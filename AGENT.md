@@ -21,4 +21,4 @@
   * `vertex_shader`: 将顶点坐标变换到投影平面, 再进行视口变换; 同时将法线向量变换到相机坐标系用于后续插值。
   * `phong_fragment_shader`: 使用 Blinn Phong 模型计算每个片元 (像素) 的颜色。
  
-  对于这个实验，你就只能修改rasterizer_renderer.cpp，rasterizer.cpp，shader.cpp里提及的函数。
+  对于这个实验，你就只能修改rasterizer_renderer.cpp，rasterizer.cpp，shader.cpp里提及的函数，不能多也不能少。
