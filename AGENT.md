@@ -11,10 +11,7 @@
   * `FragmentProcessor::worker_thread`: 从片元队列中取出片元数据, 调用 fragment shader 完成着色。
 * `rasterizer.cpp`:
   * `Rasterizer::worker_thread`: 从顶点输出队列中取出数据, 组装图元 (三角形) 并光栅化之。
-  * `Rasterizer::inside_triangle`: 给定像素坐标 (x, y) 以及三角形的三个顶点坐标, 判断 (x, y)
-
----
-是否在三角形的内部。
+  * `Rasterizer::inside_triangle`: 给定像素坐标 (x, y) 以及三角形的三个顶点坐标, 判断 (x, y)是否在三角形的内部。
   * `Rasterizer::compute_barycentric_2d`: 给定像素坐标 (x, y) 以及三角形的三个顶点坐标, 计算 (x, y) 对应的重心坐标 (α, β, γ)。
   * `Rasterizer::rasterize_triangle`: 对当前三角形进行光栅化, 在这部分中, 深度值, 顶点坐标和法线均进行了透视矫正插值。
 * `shader.cpp`:
