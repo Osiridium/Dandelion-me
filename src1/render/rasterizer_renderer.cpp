@@ -3,6 +3,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -85,6 +86,19 @@ void RasterizerRenderer::render(const Scene& scene)
             Context::rasterizer_finish = false;
             Context::fragment_finish   = false;
 
+            {
+                std::lock_guard<std::mutex> lock(Context::vertex_queue_mutex);
+                while (!Context::vertex_shader_output_queue.empty()) {
+                    Context::vertex_shader_output_queue.pop();
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(Context::rasterizer_queue_mutex);
+                while (!Context::rasterizer_output_queue.empty()) {
+                    Context::rasterizer_output_queue.pop();
+                }
+            }
+
             std::vector<std::thread> workers;
             for (int i = 0; i < n_vertex_threads; ++i) {
                 workers.emplace_back(&VertexProcessor::worker_thread, &vertex_processor);
@@ -101,10 +115,9 @@ void RasterizerRenderer::render(const Scene& scene)
             Uniforms::inv_trans_M = object->model().inverse().transpose();
             Uniforms::width       = static_cast<int>(this->width);
             Uniforms::height      = static_cast<int>(this->height);
-            // To do: 同步
-            Uniforms::material = object->mesh.material;
-            Uniforms::lights   = scene.lights;
-            Uniforms::camera   = scene.camera;
+            Uniforms::material    = object->mesh.material;
+            Uniforms::lights      = scene.lights;
+            Uniforms::camera      = scene.camera;
 
             // input object->mesh's vertices & faces & normals data
             const std::vector<float>&        vertices  = object->mesh.vertices.data;
@@ -164,26 +177,30 @@ void VertexProcessor::input_vertices(const Vector4f& positions, const Vector3f& 
 
 void VertexProcessor::worker_thread()
 {
-    while (!Context::vertex_finish) {
-        VertexShaderPayload payload;
-        {
-            if (vertex_queue.empty()) {
-                continue;
+    while (true) {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+
+        if (vertex_queue.empty()) {
+            if (Context::vertex_finish) {
+                return;
             }
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            if (vertex_queue.empty()) {
-                continue;
-            }
-            payload = vertex_queue.front();
-            vertex_queue.pop();
+            lock.unlock();
+            std::this_thread::yield();
+            continue;
         }
+
+        VertexShaderPayload payload = vertex_queue.front();
+        vertex_queue.pop();
+
         if (payload.world_position.w() == -1.0f) {
             Context::vertex_finish = true;
             return;
         }
+
         VertexShaderPayload output_payload = vertex_shader_ptr(payload);
+
         {
-            std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
+            std::unique_lock<std::mutex> output_lock(Context::vertex_queue_mutex);
             Context::vertex_shader_output_queue.push(output_payload);
         }
     }
