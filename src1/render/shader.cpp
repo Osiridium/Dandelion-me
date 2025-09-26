@@ -1,6 +1,7 @@
 #include "rasterizer_renderer.h"
 #include "../utils/math.hpp"
 #include <cstdio>
+#include <cmath>
 
 #ifdef _WIN32
     #undef min
@@ -21,7 +22,12 @@ VertexShaderPayload vertex_shader(const VertexShaderPayload& payload)
     const Eigen::Vector4f world_pos = model * model_pos;
     const Eigen::Vector4f clip_pos  = Uniforms::MVP * model_pos;
 
-    Eigen::Vector3f ndc = clip_pos.head<3>() / clip_pos.w();
+    float inv_w = 0.0f;
+    if (std::abs(clip_pos.w()) > 1e-6f) {
+        inv_w = 1.0f / clip_pos.w();
+    }
+
+    Eigen::Vector3f ndc = clip_pos.head<3>() * inv_w;
     Eigen::Vector4f viewport_pos;
     viewport_pos.x() = 0.5f * (ndc.x() + 1.0f) * static_cast<float>(Uniforms::width);
     viewport_pos.y() = 0.5f * (ndc.y() + 1.0f) * static_cast<float>(Uniforms::height);
@@ -35,8 +41,11 @@ VertexShaderPayload vertex_shader(const VertexShaderPayload& payload)
 
     // Vertex normal transformation
     Eigen::Vector3f normal = Uniforms::inv_trans_M.block<3, 3>(0, 0) * payload.normal;
-    if (normal.norm() > 0.0f) {
-        normal.normalize();
+    const float normal_len = normal.norm();
+    if (normal_len > 0.0f) {
+        normal /= normal_len;
+    } else {
+        normal = Vector3f::UnitY();
     }
     output_payload.normal = normal;
 
@@ -50,7 +59,13 @@ Vector3f phong_fragment_shader(
 {
     Vector3f color = material.ambient;
 
-    const Vector3f normal = payload.world_normal.normalized();
+    Vector3f normal = payload.world_normal;
+    const float normal_len = normal.norm();
+    if (normal_len > 0.0f) {
+        normal /= normal_len;
+    } else {
+        normal = Vector3f::UnitY();
+    }
     Vector3f       view_dir = camera.position - payload.world_pos;
     const float    view_len = view_dir.norm();
     if (view_len > 0.0f) {
