@@ -1,6 +1,7 @@
 #include "rasterizer_renderer.h"
 #include "../utils/math.hpp"
 #include <cstdio>
+#include <cmath>
 
 #ifdef _WIN32
     #undef min
@@ -15,11 +16,31 @@ VertexShaderPayload vertex_shader(const VertexShaderPayload& payload)
 {
     VertexShaderPayload output_payload = payload;
 
-    // Vertex position transformation
+    Eigen::Matrix4f model_matrix = Uniforms::inv_trans_M.inverse().transpose();
+    Eigen::Vector4f model_pos    = payload.world_position;
+    Eigen::Vector4f world_pos    = model_matrix * model_pos;
+    output_payload.world_position = world_pos;
 
-    // Viewport transformation
+    Eigen::Vector4f clip_pos = Uniforms::MVP * model_pos;
+    float            w       = clip_pos.w();
+    if (std::abs(w) < 1e-6f) {
+        w = (w >= 0.0f ? 1e-6f : -1e-6f);
+    }
+    Eigen::Vector3f ndc = clip_pos.head<3>() / w;
 
-    // Vertex normal transformation
+    Eigen::Vector4f viewport_pos = Eigen::Vector4f::Zero();
+    viewport_pos.x() = (ndc.x() * 0.5f + 0.5f) * static_cast<float>(Uniforms::width - 1);
+    viewport_pos.y() = (ndc.y() * 0.5f + 0.5f) * static_cast<float>(Uniforms::height - 1);
+    viewport_pos.z() = clip_pos.z();
+    viewport_pos.w() = w;
+    output_payload.viewport_position = viewport_pos;
+
+    Eigen::Matrix3f normal_matrix = Uniforms::inv_trans_M.topLeftCorner<3, 3>();
+    Eigen::Vector3f world_normal  = normal_matrix * payload.normal;
+    if (world_normal.norm() > 0.0f) {
+        world_normal.normalize();
+    }
+    output_payload.normal = world_normal;
 
     return output_payload;
 }
@@ -29,22 +50,20 @@ Vector3f phong_fragment_shader(
     const std::list<Light>& lights, const Camera& camera
 )
 {
-    // these lines below are just for compiling and can be deleted
-    (void)payload;
-    (void)material;
-    (void)lights;
-    (void)camera;
-    // these lines above are just for compiling and can be deleted
-
     Vector3f result = {0, 0, 0};
 
     // ka,kd,ks can be got from material.ambient,material.diffuse,material.specular
 
     // set ambient light intensity
+    const Vector3f ambient_light = Vector3f::Constant(0.1f);
+    result += material.ambient.cwiseProduct(ambient_light);
 
     // Light Direction
+    Vector3f point = payload.world_pos;
+    Vector3f normal = payload.world_normal.normalized();
 
     // View Direction
+    Vector3f view_dir = (camera.position - point).normalized();
 
     // Half Vector
 
@@ -55,6 +74,27 @@ Vector3f phong_fragment_shader(
     // Diffuse
 
     // Specular
+    for (const auto& light: lights) {
+        Vector3f light_dir = (light.position - point);
+        float    distance2 = std::max(light_dir.squaredNorm(), 1e-6f);
+        light_dir.normalize();
+
+        Vector3f attenuation = Vector3f::Constant(light.intensity / distance2);
+
+        Vector3f half_vec = (light_dir + view_dir).normalized();
+
+        float ndotl = std::max(0.0f, normal.dot(light_dir));
+        Vector3f diffuse = material.diffuse.cwiseProduct(attenuation) * ndotl;
+
+        float ndoth = std::max(0.0f, normal.dot(half_vec));
+        Vector3f specular = material.specular.cwiseProduct(attenuation)
+                             * std::pow(ndoth, material.shininess);
+
+        result += diffuse + specular;
+    }
+
+    result = result.cwiseMax(Vector3f::Zero());
+    result = result.cwiseMin(Vector3f::Ones());
 
     // set rendering result max threshold to 255
     return result * 255.f;
