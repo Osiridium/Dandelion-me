@@ -101,9 +101,10 @@ void RasterizerRenderer::render(const Scene& scene)
             Uniforms::inv_trans_M = object->model().inverse().transpose();
             Uniforms::width       = static_cast<int>(this->width);
             Uniforms::height      = static_cast<int>(this->height);
-            Uniforms::material    = object->mesh.material;
-            Uniforms::lights      = scene.lights;
-            Uniforms::camera      = scene.camera;
+            // To do: 同步
+            Uniforms::material = object->mesh.material;
+            Uniforms::lights   = scene.lights;
+            Uniforms::camera   = scene.camera;
 
             // input object->mesh's vertices & faces & normals data
             const std::vector<float>&        vertices  = object->mesh.vertices.data;
