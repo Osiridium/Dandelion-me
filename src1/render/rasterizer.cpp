@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#include <thread>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -24,39 +25,37 @@ using std::tuple;
 
 void Rasterizer::worker_thread()
 {
-    while (!Context::rasterizer_finish) {
-        VertexShaderPayload payload;
-        Triangle            triangle;
+    while (true) {
+        std::array<VertexShaderPayload, 3> vertices;
+        bool                               has_triangle = false;
+
         {
-            if (Context::vertex_finish && Context::vertex_shader_output_queue.empty()) {
-                Context::rasterizer_finish = true;
-                return;
-            }
-            if (Context::vertex_shader_output_queue.size() < 3) {
-                continue;
-            }
             std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
-            if (Context::vertex_shader_output_queue.size() < 3) {
-                continue;
-            }
-            for (size_t vertex_count = 0; vertex_count < 3; vertex_count++) {
-                payload = Context::vertex_shader_output_queue.front();
-                Context::vertex_shader_output_queue.pop();
-                if (vertex_count == 0) {
-                    triangle.world_pos[0]    = payload.world_position;
-                    triangle.viewport_pos[0] = payload.viewport_position;
-                    triangle.normal[0]       = payload.normal;
-                } else if (vertex_count == 1) {
-                    triangle.world_pos[1]    = payload.world_position;
-                    triangle.viewport_pos[1] = payload.viewport_position;
-                    triangle.normal[1]       = payload.normal;
-                } else {
-                    triangle.world_pos[2]    = payload.world_position;
-                    triangle.viewport_pos[2] = payload.viewport_position;
-                    triangle.normal[2]       = payload.normal;
+            if (Context::vertex_shader_output_queue.size() >= 3) {
+                for (size_t i = 0; i < 3; ++i) {
+                    vertices[i] = Context::vertex_shader_output_queue.front();
+                    Context::vertex_shader_output_queue.pop();
                 }
+                has_triangle = true;
             }
         }
+
+        if (!has_triangle) {
+            if (Context::vertex_finish && Context::vertex_shader_output_queue.empty()) {
+                Context::rasterizer_finish = true;
+                break;
+            }
+            std::this_thread::yield();
+            continue;
+        }
+
+        Triangle triangle;
+        for (size_t i = 0; i < 3; ++i) {
+            triangle.world_pos[i]    = vertices[i].world_position;
+            triangle.viewport_pos[i] = vertices[i].viewport_position;
+            triangle.normal[i]       = vertices[i].normal;
+        }
+
         rasterize_triangle(triangle);
     }
 }
