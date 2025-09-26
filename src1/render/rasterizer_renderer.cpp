@@ -3,6 +3,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -85,6 +86,19 @@ void RasterizerRenderer::render(const Scene& scene)
             Context::rasterizer_finish = false;
             Context::fragment_finish   = false;
 
+            {
+                std::lock_guard<std::mutex> lock(Context::vertex_queue_mutex);
+                while (!Context::vertex_shader_output_queue.empty()) {
+                    Context::vertex_shader_output_queue.pop();
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(Context::rasterizer_queue_mutex);
+                while (!Context::rasterizer_output_queue.empty()) {
+                    Context::rasterizer_output_queue.pop();
+                }
+            }
+
             std::vector<std::thread> workers;
             for (int i = 0; i < n_vertex_threads; ++i) {
                 workers.emplace_back(&VertexProcessor::worker_thread, &vertex_processor);
@@ -101,10 +115,9 @@ void RasterizerRenderer::render(const Scene& scene)
             Uniforms::inv_trans_M = object->model().inverse().transpose();
             Uniforms::width       = static_cast<int>(this->width);
             Uniforms::height      = static_cast<int>(this->height);
-            // To do: 同步
-            Uniforms::material = object->mesh.material;
-            Uniforms::lights   = scene.lights;
-            Uniforms::camera   = scene.camera;
+            Uniforms::material    = object->mesh.material;
+            Uniforms::lights      = scene.lights;
+            Uniforms::camera      = scene.camera;
 
             // input object->mesh's vertices & faces & normals data
             const std::vector<float>&        vertices  = object->mesh.vertices.data;
@@ -191,29 +204,45 @@ void VertexProcessor::worker_thread()
 
 void FragmentProcessor::worker_thread()
 {
-    while (!Context::fragment_finish) {
+    static std::mutex framebuffer_mutex;
+
+    while (true) {
+        if (Context::fragment_finish) {
+            return;
+        }
+
         FragmentShaderPayload fragment;
+        bool                  has_fragment = false;
         {
+            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+
             if (Context::rasterizer_finish && Context::rasterizer_output_queue.empty()) {
                 Context::fragment_finish = true;
                 return;
             }
-            if (Context::rasterizer_output_queue.empty()) {
-                continue;
+
+            if (!Context::rasterizer_output_queue.empty()) {
+                fragment      = Context::rasterizer_output_queue.front();
+                has_fragment  = true;
+                Context::rasterizer_output_queue.pop();
             }
-            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
-            if (Context::rasterizer_output_queue.empty()) {
-                continue;
-            }
-            fragment = Context::rasterizer_output_queue.front();
-            Context::rasterizer_output_queue.pop();
         }
-        int index = (Uniforms::height - 1 - fragment.y) * Uniforms::width + fragment.x;
-        if (fragment.depth > Context::frame_buffer.depth_buffer[index]) {
+
+        if (!has_fragment) {
+            std::this_thread::yield();
             continue;
         }
+
         fragment.color =
             fragment_shader_ptr(fragment, Uniforms::material, Uniforms::lights, Uniforms::camera);
-        Context::frame_buffer.set_pixel(index, fragment.depth, fragment.color);
+
+        const int index = (Uniforms::height - 1 - fragment.y) * Uniforms::width + fragment.x;
+
+        {
+            std::lock_guard<std::mutex> lock(framebuffer_mutex);
+            if (fragment.depth <= Context::frame_buffer.depth_buffer[index]) {
+                Context::frame_buffer.set_pixel(index, fragment.depth, fragment.color);
+            }
+        }
     }
 }
