@@ -101,9 +101,10 @@ void RasterizerRenderer::render(const Scene& scene)
             Uniforms::inv_trans_M = object->model().inverse().transpose();
             Uniforms::width       = static_cast<int>(this->width);
             Uniforms::height      = static_cast<int>(this->height);
-            Uniforms::material    = object->mesh.material;
-            Uniforms::lights      = scene.lights;
-            Uniforms::camera      = scene.camera;
+            // To do: 同步
+            Uniforms::material = object->mesh.material;
+            Uniforms::lights   = scene.lights;
+            Uniforms::camera   = scene.camera;
 
             // input object->mesh's vertices & faces & normals data
             const std::vector<float>&        vertices  = object->mesh.vertices.data;
@@ -190,27 +191,25 @@ void VertexProcessor::worker_thread()
 
 void FragmentProcessor::worker_thread()
 {
-    static std::mutex framebuffer_mutex;
     while (!Context::fragment_finish) {
         FragmentShaderPayload fragment;
-        bool                   has_fragment = false;
         {
-            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
-            if (!Context::rasterizer_output_queue.empty()) {
-                fragment = Context::rasterizer_output_queue.front();
-                Context::rasterizer_output_queue.pop();
-                has_fragment = true;
-            } else if (Context::rasterizer_finish) {
+            if (Context::rasterizer_finish && Context::rasterizer_output_queue.empty()) {
                 Context::fragment_finish = true;
                 return;
             }
-        }
-        if (!has_fragment) {
-            continue;
+            if (Context::rasterizer_output_queue.empty()) {
+                continue;
+            }
+            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+            if (Context::rasterizer_output_queue.empty()) {
+                continue;
+            }
+            fragment = Context::rasterizer_output_queue.front();
+            Context::rasterizer_output_queue.pop();
         }
         int index = (Uniforms::height - 1 - fragment.y) * Uniforms::width + fragment.x;
-        std::unique_lock<std::mutex> frame_lock(framebuffer_mutex);
-        if (fragment.depth >= Context::frame_buffer.depth_buffer[index]) {
+        if (fragment.depth > Context::frame_buffer.depth_buffer[index]) {
             continue;
         }
         fragment.color =
