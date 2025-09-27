@@ -39,6 +39,17 @@ enum class RendererType
 /*!
  * \ingroup rendering
  * \~chinese
+ * \brief 光栅化流水线的运行模式。
+ */
+enum class PipelineMode
+{
+    Serial,
+    Parallel
+};
+
+/*!
+ * \ingroup rendering
+ * \~chinese
  * \brief 离线渲染的执行入口
  */
 class RenderEngine
@@ -65,6 +76,30 @@ public:
      * \param type 渲染器类型
      */
     void render(Scene& scene, RendererType type);
+
+    /*!
+     * \~chinese
+     * \brief 设置光栅化流水线的运行模式
+     */
+    void set_rasterizer_pipeline_mode(PipelineMode mode);
+
+    /*!
+     * \~chinese
+     * \brief 获取当前光栅化流水线的运行模式
+     */
+    PipelineMode get_rasterizer_pipeline_mode() const;
+
+    /*!
+     * \~chinese
+     * \brief 设置并行流水线下的总线程数
+     */
+    void set_rasterizer_parallel_thread_count(int threads);
+
+    /*!
+     * \~chinese
+     * \brief 获取并行流水线下配置的总线程数
+     */
+    int get_rasterizer_parallel_thread_count() const;
     /*! \~chinese 渲染结果预览的背景颜色 */
     static Eigen::Vector3f background_color;
 
@@ -72,6 +107,10 @@ public:
     std::unique_ptr<RasterizerRenderer> rasterizer_render;
     /*! \~chinese whitted style渲染器 */
     std::unique_ptr<WhittedRenderer> whitted_render;
+
+private:
+    PipelineMode rasterizer_mode;
+    int          rasterizer_parallel_threads;
 };
 
 /*!
@@ -91,11 +130,32 @@ public:
     /*! \~chinese 光栅化渲染器的渲染调用接口*/
     void render(const Scene& scene);
 
+    /*!
+     * \~chinese
+     * \brief 配置流水线模式。
+     */
+    void set_pipeline_mode(PipelineMode mode);
+
+    /*!
+     * \~chinese
+     * \brief 设置并行模式下的总线程数
+     */
+    void set_parallel_thread_count(int count);
+
+    /*!
+     * \~chinese
+     * \brief 获取并行模式下配置的总线程数
+     */
+    int parallel_thread_count() const;
+
     float& width;
     float& height;
     int    n_vertex_threads;
     int    n_rasterizer_threads;
     int    n_fragment_threads;
+    int    total_parallel_threads;
+
+    PipelineMode pipeline_mode;
 
     // initialize vertex processor
     VertexProcessor vertex_processor;
