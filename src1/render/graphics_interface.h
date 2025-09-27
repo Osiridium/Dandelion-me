@@ -4,10 +4,14 @@
 #include <memory>
 #include <functional>
 #include <queue>
+#include <condition_variable>
+#include <atomic>
+#include <cstddef>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <spdlog/spdlog.h>
+#include <utility>
 
 #include "../scene/scene.h"
 
@@ -31,6 +35,10 @@ struct VertexShaderPayload
     Eigen::Vector4f viewport_position;
     /*! \~chinese 顶点法线 */
     Eigen::Vector3f normal;
+    /*! \~chinese 顶点在输入序列中的编号 */
+    std::size_t     vertex_index = 0;
+    /*! \~chinese 是否为终止任务 */
+    bool            terminate    = false;
 };
 
 /*!
@@ -114,6 +122,11 @@ inline BufferType operator&(BufferType a, BufferType b)
 class SpinLock
 {
 public:
+    SpinLock() noexcept;
+    SpinLock(const SpinLock&) noexcept;
+    SpinLock& operator=(const SpinLock&) noexcept;
+    SpinLock(SpinLock&&) noexcept;
+    SpinLock& operator=(SpinLock&&) noexcept;
 
     /*! \~chinese 加锁。 */
     void lock();
@@ -153,8 +166,16 @@ public:
      * \param index 填充位置对应的一维索引
      * \param depth 当前着色点计算出的深度
      * \param color 当前着色点计算出的颜色值
+     * \return 若通过深度测试并写入成功则返回 true
      */
-    void set_pixel(int index, float depth, const Eigen::Vector3f& color);
+    bool set_pixel(int index, float depth, const Eigen::Vector3f& color);
+
+    /*! \~chinese 延迟生成颜色并进行深度测试写入。 */
+    template <typename ColorGenerator>
+    bool set_pixel_lazy(int index, float depth, ColorGenerator&& generator);
+
+    /*! \~chinese 调整 frame buffer 的尺寸并重置内部存储。 */
+    void resize(int new_width, int new_height);
 
     /*!
      * \~chinese
@@ -178,6 +199,27 @@ private:
     /*! \~chinese 用于在深度测试和着色时对相应位置的像素加锁 */
     std::vector<SpinLock> spin_locks;
 };
+
+template <typename ColorGenerator>
+bool FrameBuffer::set_pixel_lazy(int index, float depth, ColorGenerator&& generator)
+{
+    if (index < 0 || index >= static_cast<int>(depth_buffer.size())) {
+        return false;
+    }
+
+    const std::size_t idx = static_cast<std::size_t>(index);
+    SpinLock&         lock = spin_locks[idx];
+    lock.lock();
+
+    bool updated = depth < depth_buffer[idx];
+    if (updated) {
+        depth_buffer[idx] = depth;
+        color_buffer[idx] = std::forward<ColorGenerator>(generator)();
+    }
+
+    lock.unlock();
+    return updated;
+}
 
 /*!
  * \ingroup rendering
@@ -219,6 +261,10 @@ struct Context
     static std::queue<VertexShaderPayload> vertex_shader_output_queue;
     /*! \~chinese rasterizer的输出队列 */
     static std::queue<FragmentShaderPayload> rasterizer_output_queue;
+    /*! \~chinese 顶点着色器输出可用时的条件变量 */
+    static std::condition_variable vertex_output_cv;
+    /*! \~chinese 光栅化输出可用时的条件变量 */
+    static std::condition_variable rasterizer_output_cv;
 
     /*! \~chinese 标识顶点着色器是否全部执行完毕。 */
     volatile static bool vertex_finish;
@@ -229,6 +275,19 @@ struct Context
 
     /*! \~chinese 渲染使用的 frame buffer 。 */
     static FrameBuffer frame_buffer;
+
+    /*! \~chinese 顶点输入时的顺序计数器 */
+    static std::atomic<std::size_t> vertex_input_index;
+    /*! \~chinese 顶点处理完成的数量 */
+    static std::atomic<std::size_t> vertex_processed_count;
+    /*! \~chinese 顶点总数 */
+    static std::size_t              vertex_total_count;
+    /*! \~chinese 已按序写入输出队列的下标 */
+    static std::size_t              vertex_flush_index;
+    /*! \~chinese 顶点着色器输出的缓存 */
+    static std::vector<VertexShaderPayload> vertex_shader_output_buffer;
+    /*! \~chinese 顶点着色器输出是否就绪 */
+    static std::vector<char>                vertex_output_ready;
 };
 
 #endif // DANDELION_RENDER_GRAPHICS_INTERFACE_H
