@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
-#include <utility>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -24,29 +23,14 @@ using std::tuple;
 
 void Rasterizer::worker_thread()
 {
-    std::vector<FragmentShaderPayload> local_fragments;
-    local_fragments.reserve(512);
-
     while (true) {
         VertexShaderPayload payloads[3];
         {
             std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
-            Context::vertex_output_cv.wait(lock, [&] {
-                return Context::vertex_shader_output_queue.size() >= 3 || Context::vertex_finish;
-            });
 
             if (Context::vertex_shader_output_queue.size() < 3) {
-                if (Context::vertex_finish && Context::vertex_shader_output_queue.empty()) {
-                    if (!local_fragments.empty()) {
-                        std::lock_guard<std::mutex> queue_lock(Context::rasterizer_queue_mutex);
-                        for (auto& fragment: local_fragments) {
-                            Context::rasterizer_output_queue.push(std::move(fragment));
-                        }
-                        local_fragments.clear();
-                        Context::rasterizer_output_cv.notify_all();
-                    }
+                if (Context::vertex_finish) {
                     Context::rasterizer_finish = true;
-                    Context::rasterizer_output_cv.notify_all();
                     return;
                 }
                 continue;
@@ -65,18 +49,7 @@ void Rasterizer::worker_thread()
             triangle.normal[i]       = payloads[i].normal;
         }
 
-        rasterize_triangle(triangle, local_fragments);
-
-        if (!local_fragments.empty()) {
-            {
-                std::lock_guard<std::mutex> queue_lock(Context::rasterizer_queue_mutex);
-                for (auto& fragment: local_fragments) {
-                    Context::rasterizer_output_queue.push(std::move(fragment));
-                }
-            }
-            Context::rasterizer_output_cv.notify_all();
-            local_fragments.clear();
-        }
+        rasterize_triangle(triangle);
     }
 }
 
@@ -137,7 +110,7 @@ Vector3f Rasterizer::interpolate(
 }
 
 // 对当前三角形进行光栅化
-void Rasterizer::rasterize_triangle(Triangle& t, std::vector<FragmentShaderPayload>& fragments)
+void Rasterizer::rasterize_triangle(Triangle& t)
 {
     const Vector4f* v = t.viewport_pos;
 
@@ -191,7 +164,7 @@ void Rasterizer::rasterize_triangle(Triangle& t, std::vector<FragmentShaderPaylo
             };
 
             FragmentShaderPayload payload;
-            payload.world_pos    = perspective_correct(world_pos0, world_pos1, world_pos2);
+            payload.world_pos = perspective_correct(world_pos0, world_pos1, world_pos2);
             payload.world_normal = perspective_correct(normal0, normal1, normal2);
             if (payload.world_normal.norm() > 0.0f) {
                 payload.world_normal.normalize();
@@ -200,7 +173,10 @@ void Rasterizer::rasterize_triangle(Triangle& t, std::vector<FragmentShaderPaylo
             payload.y     = y;
             payload.depth = depth;
 
-            fragments.push_back(payload);
+            {
+                std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+                Context::rasterizer_output_queue.push(payload);
+            }
         }
     }
 }
