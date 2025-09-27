@@ -4,6 +4,10 @@
 #include <memory>
 #include <functional>
 #include <queue>
+#include <condition_variable>
+#include <atomic>
+#include <cstddef>
+#include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -31,6 +35,10 @@ struct VertexShaderPayload
     Eigen::Vector4f viewport_position;
     /*! \~chinese 顶点法线 */
     Eigen::Vector3f normal;
+    /*! \~chinese 顶点在输入序列中的编号 */
+    std::size_t     vertex_index = 0;
+    /*! \~chinese 是否为终止任务 */
+    bool            terminate    = false;
 };
 
 /*!
@@ -190,6 +198,8 @@ struct Uniforms
     static Eigen::Matrix4f MVP;
     /*! \~chinese 当前渲染物体的model.inverse().transpose() */
     static Eigen::Matrix4f inv_trans_M;
+    /*! \~chinese 当前渲染物体的模型矩阵 */
+    static Eigen::Matrix4f model;
     ///@{
     /*! \~chinese 当前成像平面的长和宽 */
     static int width;
@@ -216,9 +226,13 @@ struct Context
     /*! \~chinese 保护队列的互斥锁 */
     static std::mutex rasterizer_queue_mutex;
     /*! \~chinese vertex shader的输出队列 */
-    static std::queue<VertexShaderPayload> vertex_shader_output_queue;
+    static std::queue<VertexShaderPayload>            vertex_shader_output_queue;
     /*! \~chinese rasterizer的输出队列 */
-    static std::queue<FragmentShaderPayload> rasterizer_output_queue;
+    static std::queue<std::vector<FragmentShaderPayload>> rasterizer_output_queue;
+    /*! \~chinese 顶点着色器输出可用时的条件变量 */
+    static std::condition_variable vertex_output_cv;
+    /*! \~chinese 光栅化输出可用时的条件变量 */
+    static std::condition_variable rasterizer_output_cv;
 
     /*! \~chinese 标识顶点着色器是否全部执行完毕。 */
     volatile static bool vertex_finish;
@@ -229,6 +243,19 @@ struct Context
 
     /*! \~chinese 渲染使用的 frame buffer 。 */
     static FrameBuffer frame_buffer;
+
+    /*! \~chinese 顶点输入时的顺序计数器 */
+    static std::atomic<std::size_t> vertex_input_index;
+    /*! \~chinese 顶点处理完成的数量 */
+    static std::atomic<std::size_t> vertex_processed_count;
+    /*! \~chinese 顶点总数 */
+    static std::size_t              vertex_total_count;
+    /*! \~chinese 顶点着色器输出的缓存 */
+    static std::vector<VertexShaderPayload> vertex_shader_output_buffer;
+    /*! \~chinese 顶点着色器输出是否就绪 */
+    static std::vector<char>                vertex_output_ready;
+    /*! \~chinese 对应三角形是否已入队 */
+    static std::vector<char>                triangle_enqueued;
 };
 
 #endif // DANDELION_RENDER_GRAPHICS_INTERFACE_H
