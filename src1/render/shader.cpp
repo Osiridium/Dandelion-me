@@ -16,9 +16,8 @@ VertexShaderPayload vertex_shader(const VertexShaderPayload& payload)
 {
     VertexShaderPayload output_payload = payload;
 
-    Eigen::Matrix4f model_matrix = Uniforms::inv_trans_M.inverse().transpose();
-    Eigen::Vector4f model_pos    = payload.world_position;
-    Eigen::Vector4f world_pos    = model_matrix * model_pos;
+    Eigen::Vector4f model_pos = payload.world_position;
+    Eigen::Vector4f world_pos = Uniforms::model * model_pos;
     output_payload.world_position = world_pos;
 
     Eigen::Vector4f clip_pos = Uniforms::MVP * model_pos;
