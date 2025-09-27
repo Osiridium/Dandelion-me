@@ -24,19 +24,29 @@ using std::tuple;
 void Rasterizer::worker_thread()
 {
     while (true) {
-        std::size_t triangle_index = Context::rasterizer_triangle_index.fetch_add(1);
-        if (triangle_index >= Context::rasterizer_triangle_count) {
-            return;
+        VertexShaderPayload payloads[3];
+        {
+            std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
+
+            if (Context::vertex_shader_output_queue.size() < 3) {
+                if (Context::vertex_finish) {
+                    Context::rasterizer_finish = true;
+                    return;
+                }
+                continue;
+            }
+
+            for (int i = 0; i < 3; ++i) {
+                payloads[i] = Context::vertex_shader_output_queue.front();
+                Context::vertex_shader_output_queue.pop();
+            }
         }
 
-        std::size_t base_index = triangle_index * 3;
-        Triangle    triangle;
-
+        Triangle triangle;
         for (int i = 0; i < 3; ++i) {
-            const auto& payload = Context::vertex_shader_output_buffer[base_index + i];
-            triangle.world_pos[i]    = payload.world_position;
-            triangle.viewport_pos[i] = payload.viewport_position;
-            triangle.normal[i]       = payload.normal;
+            triangle.world_pos[i]    = payloads[i].world_position;
+            triangle.viewport_pos[i] = payloads[i].viewport_position;
+            triangle.normal[i]       = payloads[i].normal;
         }
 
         rasterize_triangle(triangle);
@@ -125,10 +135,6 @@ void Rasterizer::rasterize_triangle(Triangle& t)
     Vector3f normal1    = t.normal[1];
     Vector3f normal2    = t.normal[2];
 
-    std::vector<FragmentShaderPayload> fragment_batch;
-    fragment_batch.reserve(static_cast<std::size_t>(std::max(0, x1 - x0 + 1))
-                           * static_cast<std::size_t>(std::max(0, y1 - y0 + 1)));
-
     for (int x = x0; x <= x1; ++x) {
         for (int y = y0; y <= y1; ++y) {
             if (!inside_triangle(x, y, v)) {
@@ -167,13 +173,10 @@ void Rasterizer::rasterize_triangle(Triangle& t)
             payload.y     = y;
             payload.depth = depth;
 
-            fragment_batch.push_back(payload);
+            {
+                std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+                Context::rasterizer_output_queue.push(payload);
+            }
         }
-    }
-
-    if (!fragment_batch.empty()) {
-        std::lock_guard<std::mutex> lock(Context::rasterizer_queue_mutex);
-        Context::fragment_batch_queue.emplace(std::move(fragment_batch));
-        Context::rasterizer_output_cv.notify_all();
     }
 }
