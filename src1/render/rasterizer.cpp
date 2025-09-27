@@ -27,14 +27,10 @@ void Rasterizer::worker_thread()
         VertexShaderPayload payloads[3];
         {
             std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
-            Context::vertex_output_cv.wait(lock, [&] {
-                return Context::vertex_shader_output_queue.size() >= 3 || Context::vertex_finish;
-            });
 
             if (Context::vertex_shader_output_queue.size() < 3) {
-                if (Context::vertex_finish && Context::vertex_shader_output_queue.empty()) {
+                if (Context::vertex_finish) {
                     Context::rasterizer_finish = true;
-                    Context::rasterizer_output_cv.notify_all();
                     return;
                 }
                 continue;
@@ -181,7 +177,6 @@ void Rasterizer::rasterize_triangle(Triangle& t)
                 std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
                 Context::rasterizer_output_queue.push(payload);
             }
-            Context::rasterizer_output_cv.notify_one();
         }
     }
 }
