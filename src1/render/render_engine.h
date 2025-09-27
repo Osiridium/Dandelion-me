@@ -39,17 +39,6 @@ enum class RendererType
 /*!
  * \ingroup rendering
  * \~chinese
- * \brief 光栅化流水线的运行模式。
- */
-enum class PipelineMode
-{
-    Serial,
-    Parallel
-};
-
-/*!
- * \ingroup rendering
- * \~chinese
  * \brief 离线渲染的执行入口
  */
 class RenderEngine
@@ -76,12 +65,6 @@ public:
      * \param type 渲染器类型
      */
     void render(Scene& scene, RendererType type);
-
-    /*!
-     * \~chinese
-     * \brief 设置光栅化流水线的运行模式
-     */
-    void set_rasterizer_pipeline_mode(PipelineMode mode);
     /*! \~chinese 渲染结果预览的背景颜色 */
     static Eigen::Vector3f background_color;
 
@@ -108,19 +91,11 @@ public:
     /*! \~chinese 光栅化渲染器的渲染调用接口*/
     void render(const Scene& scene);
 
-    /*!
-     * \~chinese
-     * \brief 配置流水线模式。
-     */
-    void set_pipeline_mode(PipelineMode mode);
-
     float& width;
     float& height;
     int    n_vertex_threads;
     int    n_rasterizer_threads;
     int    n_fragment_threads;
-
-    PipelineMode pipeline_mode;
 
     // initialize vertex processor
     VertexProcessor vertex_processor;
