@@ -3,6 +3,7 @@
 
 #include <list>
 #include <queue>
+#include <condition_variable>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -53,6 +54,8 @@ private:
     std::queue<VertexShaderPayload> vertex_queue;
     /*! \~chinese 保护顶点队列的互斥锁 */
     std::mutex                      queue_mutex;
+    /*! \~chinese 顶点输入队列的条件变量 */
+    std::condition_variable         queue_cv;
 };
 
 /*!
