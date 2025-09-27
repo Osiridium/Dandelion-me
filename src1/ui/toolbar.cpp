@@ -348,7 +348,8 @@ void Toolbar::model_mode(Scene& scene)
     }
 }
 
-const char* renderer_names[] = {"Rasterizer Renderer", "Whitted-Style Ray-Tracer"};
+const char* renderer_names[]    = {"Rasterizer Renderer", "Whitted-Style Ray-Tracer"};
+const char* pipeline_mode_names[] = {"Serial Pipeline", "Parallel Pipeline"};
 
 void Toolbar::render_mode(Scene& scene)
 {
@@ -373,8 +374,31 @@ void Toolbar::render_mode(Scene& scene)
         default: break;
         }
         if (current_renderer == RendererType::RASTERIZER) {
-            ImGui::SetNextItemWidth(0.5f * ImGui::CalcItemWidth());
-            ImGui::InputInt("Number of Threads", &render_engine.n_threads);
+            int pipeline_mode_index =
+                render_engine.get_rasterizer_pipeline_mode() == PipelineMode::Serial ? 0 : 1;
+            if (ImGui::Combo("Pipeline Mode", &pipeline_mode_index, pipeline_mode_names, 2)) {
+                PipelineMode selected_mode =
+                    pipeline_mode_index == 0 ? PipelineMode::Serial : PipelineMode::Parallel;
+                render_engine.set_rasterizer_pipeline_mode(selected_mode);
+            }
+
+            if (pipeline_mode_index == 1) {
+                int parallel_threads = render_engine.get_rasterizer_parallel_thread_count();
+                ImGui::SetNextItemWidth(0.5f * ImGui::CalcItemWidth());
+                if (ImGui::InputInt("Number of Threads", &parallel_threads)) {
+                    render_engine.set_rasterizer_parallel_thread_count(parallel_threads);
+                    parallel_threads = render_engine.get_rasterizer_parallel_thread_count();
+                }
+                if (render_engine.rasterizer_render) {
+                    const auto& rasterizer_renderer = *render_engine.rasterizer_render;
+                    ImGui::Text(
+                        "Stage Threads (V/R/F): %d / %d / %d",
+                        rasterizer_renderer.n_vertex_threads,
+                        rasterizer_renderer.n_rasterizer_threads,
+                        rasterizer_renderer.n_fragment_threads
+                    );
+                }
+            }
         }
         if (current_renderer == RendererType::WHITTED_STYLE) {
             ImGui::Checkbox("Use BVH for Acceleration", &render_engine.whitted_render->use_bvh);

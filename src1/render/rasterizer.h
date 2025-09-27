@@ -52,7 +52,7 @@ private:
      *
      * \param t 要进行光栅化的三角形
      */
-    void rasterize_triangle(Triangle& t);
+    void rasterize_triangle(Triangle& t, std::vector<FragmentShaderPayload>& fragments);
 
     /*! \~chinese 判断像素坐标 (x,y) 是否在给定三个顶点的三角形内 */
     static bool inside_triangle(int x, int y, const Eigen::Vector4f* vertices);

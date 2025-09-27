@@ -1,15 +1,52 @@
 #include "render_engine.h"
 
+#include <algorithm>
+
 Eigen::Vector3f RenderEngine::background_color(RGB_COLOR(100, 100, 100));
 
-RenderEngine::RenderEngine()
+RenderEngine::RenderEngine() :
+    width(0.0f),
+    height(0.0f),
+    n_threads(4),
+    rasterizer_mode(PipelineMode::Parallel),
+    rasterizer_parallel_threads(6)
 {
     // unique pointer to Rasterizer Renderer
-    rasterizer_render = std::make_unique<RasterizerRenderer>(*this, 2, 2, 2);
+    rasterizer_render = std::make_unique<RasterizerRenderer>(
+        *this, 1, 1, 1
+    );
     // unique pointer to Whitted Style Renderer
     whitted_render = std::make_unique<WhittedRenderer>(*this);
-    // default setting of number of threads(if use multi-threads edition)
-    n_threads = 4;
+
+    set_rasterizer_pipeline_mode(rasterizer_mode);
+    set_rasterizer_parallel_thread_count(rasterizer_parallel_threads);
+}
+
+void RenderEngine::set_rasterizer_pipeline_mode(PipelineMode mode)
+{
+    rasterizer_mode = mode;
+    if (rasterizer_render) {
+        rasterizer_render->set_pipeline_mode(mode);
+    }
+}
+
+PipelineMode RenderEngine::get_rasterizer_pipeline_mode() const
+{
+    return rasterizer_mode;
+}
+
+void RenderEngine::set_rasterizer_parallel_thread_count(int threads)
+{
+    int clamped = std::max(3, threads);
+    rasterizer_parallel_threads = clamped;
+    if (rasterizer_render) {
+        rasterizer_render->set_parallel_thread_count(clamped);
+    }
+}
+
+int RenderEngine::get_rasterizer_parallel_thread_count() const
+{
+    return rasterizer_parallel_threads;
 }
 
 // choose render type
@@ -49,14 +86,19 @@ void FrameBuffer::clear(BufferType buff)
     }
 }
 
-void FrameBuffer::set_pixel(int index, float depth, const Eigen::Vector3f& color)
+bool FrameBuffer::set_pixel(int index, float depth, const Eigen::Vector3f& color)
 {
     // spin locks lock
     spin_locks[index].lock();
 
-    depth_buffer[index] = depth;
-    color_buffer[index] = color;
+    bool updated = false;
+    if (depth <= depth_buffer[index]) {
+        depth_buffer[index] = depth;
+        color_buffer[index] = color;
+        updated             = true;
+    }
 
     // spin locks unlock
     spin_locks[index].unlock();
+    return updated;
 }
