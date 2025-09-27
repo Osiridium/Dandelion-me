@@ -27,14 +27,10 @@ void Rasterizer::worker_thread()
         VertexShaderPayload payloads[3];
         {
             std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
-            Context::vertex_output_cv.wait(lock, [&] {
-                return Context::vertex_shader_output_queue.size() >= 3 || Context::vertex_finish;
-            });
 
             if (Context::vertex_shader_output_queue.size() < 3) {
-                if (Context::vertex_finish && Context::vertex_shader_output_queue.empty()) {
+                if (Context::vertex_finish) {
                     Context::rasterizer_finish = true;
-                    Context::rasterizer_output_cv.notify_all();
                     return;
                 }
                 continue;
@@ -139,9 +135,6 @@ void Rasterizer::rasterize_triangle(Triangle& t)
     Vector3f normal1    = t.normal[1];
     Vector3f normal2    = t.normal[2];
 
-    std::vector<FragmentShaderPayload> fragments;
-    fragments.reserve(static_cast<std::size_t>((x1 - x0 + 1) * (y1 - y0 + 1)));
-
     for (int x = x0; x <= x1; ++x) {
         for (int y = y0; y <= y1; ++y) {
             if (!inside_triangle(x, y, v)) {
@@ -171,7 +164,7 @@ void Rasterizer::rasterize_triangle(Triangle& t)
             };
 
             FragmentShaderPayload payload;
-            payload.world_pos    = perspective_correct(world_pos0, world_pos1, world_pos2);
+            payload.world_pos = perspective_correct(world_pos0, world_pos1, world_pos2);
             payload.world_normal = perspective_correct(normal0, normal1, normal2);
             if (payload.world_normal.norm() > 0.0f) {
                 payload.world_normal.normalize();
@@ -180,15 +173,10 @@ void Rasterizer::rasterize_triangle(Triangle& t)
             payload.y     = y;
             payload.depth = depth;
 
-            fragments.push_back(payload);
+            {
+                std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+                Context::rasterizer_output_queue.push(payload);
+            }
         }
-    }
-
-    if (!fragments.empty()) {
-        {
-            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
-            Context::rasterizer_output_queue.push(std::move(fragments));
-        }
-        Context::rasterizer_output_cv.notify_all();
     }
 }
