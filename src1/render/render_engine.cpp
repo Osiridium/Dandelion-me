@@ -12,13 +12,6 @@ RenderEngine::RenderEngine()
     n_threads = 4;
 }
 
-void RenderEngine::set_rasterizer_pipeline_mode(PipelineMode mode)
-{
-    if (rasterizer_render) {
-        rasterizer_render->set_pipeline_mode(mode);
-    }
-}
-
 // choose render type
 void RenderEngine::render(Scene& scene, RendererType type)
 {
